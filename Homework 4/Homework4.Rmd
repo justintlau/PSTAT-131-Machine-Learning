@@ -1,0 +1,283 @@
+---
+title: "Homework4"
+author: "Justin Lau"
+date: "12/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Libraries
+```{r}
+library(tidyverse)
+library(tree)
+library(randomForest)
+library(gbm)
+library(ROCR)
+library(e1071)
+library(imager)
+library(dplyr)
+```
+
+Question 1a
+Since there are n observations in the bootstrap sample, and we are trying to pick a sample that isn't j, we can make it n-1 observations. There are n replacement methods therefore the probability of any observation that isn't j is (n-1)^n divided by total observation replacements n^n
+which is (1-1/n)^n
+
+b 
+```{r}
+n = 1000
+bootstrap = (1-1/n)^n
+bootstrap
+```
+
+c
+```{r}
+numbers <- 1:1000
+samples <- list()
+for(i in 1:10000){
+  samples[[i]] <- sample(numbers, size = 1000, replace = TRUE)
+}
+boot <- c()
+for(i in 1:10000){
+  boot[i] <- (25 %in% unique(samples[[i]]))
+}
+(prob <- (1 - sum(boot)/(length(samples))))
+```
+
+d
+```{r}
+B <- 1000
+n <- 126
+Shots <- rbinom(126,1,p=.492)
+phat <- mean(Shots)
+sd_hat <- sqrt(phat * (1-phat) / 50 )
+
+bootstrap_estimates <- sapply(1:1000, function(i) mean(Shots[sample(n,replace=TRUE)]))
+bootstrap_estimates <- data.frame(bootstrap_estimates)
+ggplot(bootstrap_estimates, aes(x=bootstrap_estimates)) + geom_histogram(color="blue", fill="yellow", bins=30) + geom_density(alpha=.2) + geom_vline(data=bootstrap_estimates, aes(xintercept=phat))
+
+```
+```{r}
+quantile(bootstrap_estimates$bootstrap_estimates, probs = c(.025, .975))
+```
+Curry's shooting percentage will go down as the season progresses because of the idea of regression to the mean. His shooting percentage is an outlier to the league's average as well as his own and as time goes on, his stats will regress more towards a mean value instead of an outlier.
+
+
+Question 2
+```{r}
+load("faces_array.RData")
+```
+
+```{r}
+face_mat <- sapply(1:1000, function(i) as.numeric(faces_array[, , i])) %>% t
+plot_face <- function(image_vector) {
+plot(as.cimg(t(matrix(image_vector, ncol=100))), axes=FALSE, asp=1)
+}
+```
+
+```{r, fig.height=8}
+plot_face(colMeans(face_mat))
+```
+ 2b
+```{r}
+pca <- prcomp(face_mat,center=TRUE, scale=FALSE)
+sdev <- pca$sdev
+pve <- sdev^2 / sum(sdev^2)
+cumulative_pve <- cumsum(pve)
+par(mfrow=c(1, 2))
+plot(pve, type="l", xlab = "Principle Component",lwd=3)
+plot(cumulative_pve, type="l", xlab = "Principle Component", lwd=3)
+```
+We need about 5 PC to explain atleast 50% of the variance.
+
+2c
+```{r, fig.height=6}
+par(mfrow=c(4,4))
+for (i in 1:16){
+  plot_face(pca$rotation[,i])
+}
+```
+
+2d
+```{r, fig.height=6}
+par(mfrow=c(2,5))
+lowest1 <- order(pca$x[,1], decreasing=FALSE)
+highest1 <- order(pca$x[,1], decreasing=TRUE)
+for(i in 1:5){
+  plot_face(face_mat[lowest1[i],])
+}
+for (i in 1:5){
+  plot_face(face_mat[highest1[i],])
+}
+```
+
+```{r, fig.height=6}
+par(mfrow=c(2,5))
+lowest5 <- order(pca$x[,5], decreasing=FALSE)
+highest5 <- order(pca$x[,5], decreasing=TRUE)
+for(i in 1:5){
+  plot_face(face_mat[lowest5[i],])
+}
+for (i in 1:5){
+  plot_face(face_mat[highest5[i],])
+}
+```
+PC1 appears to get a lot more of the general shape of a person's face which might be all that is needed for facial recognition, but PC5 appears to get a lot more of the finer details of a person's face and the more minute details of the photo.
+
+
+Question 3
+```{r}
+nonlinear <- read.csv('nonlinear.csv', header=TRUE)
+nonlinear$Y <- as.factor(nonlinear$Y)
+```
+3a
+```{r}
+ggplot(nonlinear, aes(x=X1, y=X2, color=Y)) + geom_point()
+```
+
+3b
+```{r}
+glm.fit <- glm(Y~X1+X2, data=nonlinear, family=binomial)
+summary(glm.fit)
+gr <- expand.grid(X1=seq(-5, 5, by=0.1), 
+                  X2=seq(-5, 5, by=0.1)) 
+
+prob.test = round(predict(glm.fit, gr, type="response"),digits=5)
+gr  = gr %>% mutate(Probability=prob.test)
+
+gr <- gr %>% mutate(Y=as.factor(ifelse(Probability<=0.5, "0","1")))
+ggplot(gr, aes(x=X1, y=X2), alpha=0.5) + geom_point() + geom_raster(aes(fill=Y)) 
+```
+
+3c
+```{r}
+poly.fit <- glm(Y~poly(X1,2) + poly(X2,2) + X1:X2 , data=nonlinear, family=binomial)
+summary(poly.fit)
+
+gr.poly <- expand.grid(X1=seq(-5, 5, by=0.1), 
+                  X2=seq(-5, 5, by=0.1)) 
+
+poly.test = round(predict(poly.fit, gr.poly, type="response"),digits=5)
+gr.poly  = gr.poly %>% mutate(Probability=poly.test)
+
+gr.poly <- gr.poly %>% mutate(Y=as.factor(ifelse(Probability<=0.5, "0","1")))
+ggplot(gr.poly, aes(x=X1, y=X2), alpha=0.5) + geom_point() + geom_raster(aes(fill=Y)) 
+```
+
+```{r}
+poly.fifth.fit <- glm(Y~poly(X1,5) + poly(X2,5), data=nonlinear, family=binomial)
+summary(poly.fifth.fit)
+
+gr.fifth.poly <- expand.grid(X1=seq(-5, 5, by=0.1), 
+                  X2=seq(-5, 5, by=0.1)) 
+
+poly.fifth.test = round(predict(poly.fifth.fit, gr.fifth.poly, type="response"),digits=5)
+gr.fifth.poly  = gr.fifth.poly %>% mutate(Probability=poly.fifth.test)
+
+gr.fifth.poly <- gr.fifth.poly %>% mutate(Y=as.factor(ifelse(Probability<=0.5, "0","1")))
+ggplot(gr.fifth.poly, aes(x=X1, y=X2), alpha=0.5) + geom_point() + geom_raster(aes(fill=Y)) 
+
+```
+
+3e
+The coefficients in the linear equation show that the only variable that is significant with an alpha value of 0.05 is X1, but as with the polynomial models we can see that in the 2 degree that only the ones to the second degree are significant. With the 5th degree polynomial there appears to be no significant variables under a 0.05 alpha value, this could be due to overfitting the data as we can see with the outer portions of the graph.
+
+Question 4
+```{r}
+library(ISLR)
+head(Caravan)
+data("Caravan")
+```
+4a
+```{r}
+train <- sample(1:nrow(Caravan), 1000)
+train.caravan <- Caravan[train,]
+test.caravan <- Caravan[-train,]
+```
+
+4b
+```{r}
+set.seed(2)
+boost.caravan = gbm(ifelse(Purchase=="Yes",1,0)~., data=train.caravan,
+distribution="bernoulli", n.trees=1000, shrinkage = .01)
+
+summary(boost.caravan)
+```
+
+The most influentual predictors appear to be PPERSAUT and MKOOPKLA.
+
+4c
+```{r}
+bag.caravan <- randomForest(Purchase~., data=train.caravan, importance=TRUE)
+bag.caravan
+importance(bag.caravan)
+```
+
+The out-of-bag estimate error is 4.7%.
+There was 9 variables tried at each split.
+There were 500 trees used to fit the data.
+
+4d
+```{r}
+yhat.bag = predict(bag.caravan, newdata = test.caravan, type="prob")
+yhat.bag  = data.frame(yhat.bag[,2])
+names(yhat.bag)[1] = "Probability"
+yhat.bag = yhat.bag %>% mutate(Probability=as.factor(ifelse(Probability<=0.2, "No","Yes")))
+bag.err = table(pred = yhat.bag$Probability, truth = test.caravan$Purchase)
+test.bag.err = 1 - sum(diag(bag.err))/sum(bag.err)
+test.bag.err
+```
+
+```{r}
+yhat.boost = predict(boost.caravan, newdata = test.caravan, type="response")
+yhat.boost = data.frame(yhat.boost)
+yhat.boost = yhat.boost %>% mutate(Probability=as.factor(ifelse(yhat.boost<=0.2,"No","Yes")))
+boost.err = table(pred = yhat.boost$Probability, truth = test.caravan$Purchase)
+test.boost.err = 1 - sum(diag(boost.err))/sum(boost.err)
+test.boost.err
+```
+
+```{r}
+boost.err
+```
+
+Out of 304 people who made a purchase 41 were predicted correctly which is 13.486%
+
+Question 5
+```{r}
+drug_use <- read_csv('drug.csv',
+col_names = c('ID','Age','Gender','Education','Country','Ethnicity',
+'Nscore','Escore','Oscore','Ascore','Cscore','Impulsive',
+'SS','Alcohol','Amphet','Amyl','Benzos','Caff','Cannabis',
+'Choc','Coke','Crack','Ecstasy','Heroin','Ketamine','Legalh','LSD',
+'Meth', 'Mushrooms', 'Nicotine', 'Semer','VSA'))
+```
+
+5a
+```{r}
+drug_use <- drug_use %>% mutate(recent_cannabis_use=as.factor(ifelse(Cannabis>="CL3", "No", "Yes")))
+drug_use_subset <- drug_use %>% select(Age:SS, recent_cannabis_use)
+train <- sample(1:nrow(drug_use_subset), 1500)
+train.drug <- drug_use[train,]
+test.drug <- drug_use[-train,]
+
+svmfit=svm(recent_cannabis_use~Age+SS, data=train.drug, kernel="radial", cost=1,scale=FALSE)
+ypred=predict(svmfit,test.drug)
+table(predict=ypred, truth=test.drug$recent_cannabis_use)
+```
+
+5b
+```{r}
+set.seed(1)
+tune.out=tune(svm,recent_cannabis_use~Age+SS, data=train.drug, kernel="radial",
+ranges=list(cost=c(0.001, 0.01, 0.1, 1, 10, 100)))
+summary(tune.out)$"best.model"
+drug.err <- table(true=train.drug$recent_cannabis_use, pred=predict(tune.out$best.model,newdata=train.drug))
+train.drug.err = 1 - sum(diag(drug.err))/sum(drug.err)
+train.drug.err
+```
+The best cost for this model is 0.01 and the cross validated training error is 24.933%
+
+

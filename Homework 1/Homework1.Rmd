@@ -1,0 +1,257 @@
+---
+title: "PSTAT 131 Homework"
+author: "Justin Lau"
+date: "10/17/2020"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Libraries
+```{r}
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(plyr)
+library(reshape2)
+library(class)
+library(boot)
+```
+Input Data
+```{r}
+algae <- read_table2("algaeBloom.txt", col_names=
+c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4',
+'oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),
+na="XXXXXXX")
+attach(algae)
+```
+
+Question 1 a
+```{r}
+group <- group_by(algae,season)
+summarise(group, length(season))
+```
+
+1b
+```{r}
+chemicals <- list(mxPH, mnO2, Cl, NO3, Chla)
+sapply(algae[4:11], mean, na.rm = TRUE)
+sapply(algae[4:11], var, na.rm = TRUE)
+```
+1c
+```{r}
+sapply(algae[4:11], median, na.rm = TRUE)
+sapply(algae[4:11], mad, na.rm = TRUE)
+```
+
+
+Question 2a
+```{r}
+ggplot(algae, aes(x=mxPH, y = (..count..)/sum(..count..))) + labs(title = 'Histogram of mxPH', y = 'Probability') + geom_histogram()
+
+```
+
+2b
+```{r}
+ggplot(algae, aes(x=mxPH, y = (..count..)/sum(..count..))) + labs(title = 'Histogram of mxPH', y = 'Probability') + geom_histogram() + geom_density() 
+
+```
+
+2c
+```{r}
+ggplot(algae, aes(x=a1, y=size)) + geom_boxplot() + labs(title = 'A conditioned Boxplot of Algal a1')
+```
+
+2d
+```{r}
+ggplot(algae, aes(y=NO3)) + labs(x='NO3',title='Boxplot of NO3') + geom_boxplot()
+
+ggplot(algae, aes(y=NH4)) + labs(x='NH4',title='Boxplot of NH4') + geom_boxplot()
+
+
+lowerq = quantile(algae$NO3, na.rm =TRUE)[2]
+upperq = quantile(algae$NO3, na.rm =TRUE)[4]
+iqr = upperq - lowerq 
+upper.threshold.NO3 = (iqr * 1.5) + upperq
+lower.threshold.NO3= lowerq - (iqr * 1.5)
+count(algae$NO3 > upper.threshold.NO3)
+count(algae$NO3 < lower.threshold.NO3)
+
+lowerq = quantile(algae$NH4, na.rm =TRUE)[2]
+upperq = quantile(algae$NH4, na.rm =TRUE)[4]
+iqr = upperq - lowerq 
+upper.threshold.NH4 = (iqr * 1.5) + upperq
+lower.threshold.NH4= lowerq - (iqr * 1.5)
+count(algae$NH4 > upper.threshold.NH4)
+count(algae$NH4 < lower.threshold.NH4)
+```
+There are 5 outliers for N03 and 27 outliers for NH4. This is calculated using the IQR of the data and setting upper and lower thresholds of 1.5 to test for data points outside of the range. 
+
+2e
+```{r}
+cat('The mean of N03 =', mean(algae$NO3, na.rm = TRUE), '\n', 'The variance of NO3 =', var(algae$NO3, na.rm = TRUE), '\n')
+cat('The median of N03 =', median(algae$NO3, na.rm = TRUE), '\n', 'The MAD of NO3 =', mad(algae$NO3, na.rm = TRUE), '\n')
+```
+
+```{r}
+cat('The mean of NH4 =', mean(algae$NH4, na.rm = TRUE), '\n', 'The variance of NH4 =', var(algae$NH4, na.rm = TRUE), '\n')
+cat('The median of NH4 =', median(algae$NH4, na.rm = TRUE), '\n', 'The MAD of NH4 =', mad(algae$NH4, na.rm = TRUE), '\n')
+```
+It appears that median and Mad tend to hold up more to outliers, this is caused because using the mean it is suceptible to skewing the data when there are extremem outliers in the data. 
+
+
+Question 3a
+```{r}
+sum(is.na(algae))
+summary(algae)
+```
+
+3b
+```{r}
+algae.del <- algae %>% filter(complete.cases(algae))
+print('There are 184 complete observations')
+```
+
+3c
+```{r}
+algae.med = algae %>% mutate_at(vars(4:11), funs(ifelse(is.na(.), median(., na.rm=TRUE), .)))
+algae.med[48,]
+algae.med[62,]
+algae.med[199,]
+```
+
+3d
+```{r}
+for(i in 4:11){
+  print(paste0(colnames(algae)[i]))
+  print(cor(algae[,i],algae[,(i+1):11],use = 'pairwise.complete.obs'))
+}
+
+fit <- lm(algae$PO4 ~ algae$oPO4)
+PO4_pred <- predict(fit)
+
+PO4_pred[28]
+
+```
+
+3e
+There can be surviorship bias that is using data from what was there to impute onto data that was missing. Another issue with this is that it reduces the actual variance of the data alongside the standard error. Imputation of the median while sometimes necessary messes with the relationship of variables.
+
+Question 4a
+```{r}
+nfold = 5
+set.seed(66)
+folds = cut(1:nrow(algae.med), breaks=nfold, labels=FALSE) %>% sample()
+folds
+```
+
+4b
+```{r}
+do.chunk <- function(chunkid, chunkdef, dat){ # function argument
+  train = (chunkdef != chunkid)
+  
+  Xtr = dat[train,1:11] # get training set
+  Ytr = dat[train,12] # get true response values in trainig set
+  
+  Xvl = dat[!train,1:11] # get validation set
+  Yvl = dat[!train,12] # get true response values in validation set
+  
+  lm.a1 <- lm(a1~., data = dat[train,1:12])
+  predYtr = predict(lm.a1) # predict training values
+  predYvl = predict(lm.a1,Xvl) # predict validation values
+  data.frame(fold = chunkid,
+    train.error = mean((predYtr - Ytr$a1)^2), # compute and store training error
+    val.error = mean((predYvl - Yvl$a1)^2)) # compute and store test error
+}
+```
+
+```{r}
+error.folds = NULL 
+allK = 1:50 
+set.seed(67)
+for (j in allK){
+    tmp = ldply(1:nfold, do.chunk, chunkdef=folds, dat=algae.med) 
+    error.folds = rbind(error.folds, tmp) 
+}
+tmp
+``` 
+
+Question 5
+```{r}
+algae.Test <- read_table2('algaeTest.txt',
+col_names=c('season','size','speed','mxPH','mnO2','Cl','NO3',
+'NH4','oPO4','PO4','Chla','a1'),
+na=c('XXXXXXX'))
+```
+
+```{r}
+model <- glm(a1~ season + size + speed + mxPH + mnO2 + Cl + NO3 + NH4 + oPO4 + PO4 + Chla, data = algae.Test)
+predictY <- predict(model)
+Ytr <- algae.Test$a1
+
+test.error = mean((predictY - Ytr)^2)
+test.error
+```
+This test error is close to the training error produced in question 4b
+
+Question 6a
+```{r}
+library(ISLR)
+head(Wage)
+data(Wage)
+```
+
+```{r}
+ggplot(Wage, aes(x=age, y=wage)) + labs(title = 'Wage as a function of age') + geom_point()  + geom_smooth()
+```
+
+6b
+```{r}
+Wage <- Wage %>% select(c(age,wage))
+model <- glm(wage~poly(age,10), data=Wage)
+
+nfold = 5
+folds = cut(1:nrow(Wage), breaks=nfold, labels=FALSE) %>% sample()
+
+
+
+do.chunks <- function(chunkid, chunkdef, dat){ # function argument
+  train = (chunkdef != chunkid)
+
+  Ytr = dat[train,2] # get true response values in trainig set
+  for (p in c(1:11)){
+    lm.wage <- lm(wage~poly(age,p), data = dat[train,1:2])
+    predYtr = predict(lm.wage) # predict training values
+    train.error = mean((predYtr - Ytr)^2)
+    nam <- paste("A", p, sep = "")
+    assign(nam, data.frame(polynomial.degree = p, train.error = train.error))
+  }
+  error <- rbind(A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11)
+  print(error)
+}
+
+```
+
+```{r}
+for (p in c(1:11)) {
+  model <- lm(wage~poly(age,p), data = Wage)
+  predictY <- predict(model)
+  Ytr <- Wage$wage
+  test.error = mean((Ytr - predictY)^2)
+  nam <- paste("A", p, sep = "")
+  assign(nam, data.frame(polynomial.degree = p, test.error = test.error))
+}
+test.error <- rbind(A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11)
+train.error <- do.chunks(4, folds, Wage)
+both.error <- merge(train.error, test.error, by.y = 'polynomial.degree' )
+print(both.error)
+```
+6c
+```{r}
+ggplot(both.error, aes(x=polynomial.degree))  + geom_line(aes(y=train.error, color='Training Error')) + geom_line(aes(y=test.error, color='Testing Error')) + labs(title = 'Training and Testing Error of wages as a polynomial function of age', y = 'MSE', x='Degree of Polynomial', color = 'Type of Error') 
+```
+
+

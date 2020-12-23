@@ -1,0 +1,196 @@
+---
+title: "Homework2"
+author: "Justin Lau"
+date: "10/28/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Libraries
+```{r}
+library(tidyverse)
+library(reshape2)
+library(tree)
+library(plyr)
+library(class)
+library(rpart)
+library(maptree)
+library(ROCR)
+```
+
+```{r}
+spam <- read_table2("spambase.tab", guess_max=2000)
+spam <- spam %>%
+  mutate(y = factor(y, levels=c(0,1), labels=c("good", "spam"))) %>% 
+  mutate_at(.vars=vars(-y), .funs=scale) # scale others
+```
+
+```{r}
+calc_error_rate <- function(predicted.value, true.value){
+  return(mean(true.value!=predicted.value))
+}
+
+records = matrix(NA, nrow=3, ncol=2)
+colnames(records) <- c("train.error","test.error")
+rownames(records) <- c("knn","tree","logistic")
+```
+
+```{r}
+set.seed(1)
+test.indices = sample(1:nrow(spam), 1000)
+spam.train=spam[-test.indices,]
+spam.test=spam[test.indices,]
+```
+
+```{r}
+nfold = 10
+set.seed(1)
+folds = seq.int(nrow(spam.train)) %>% ## sequential obs ids
+cut(breaks = nfold, labels=FALSE) %>% ## sequential fold ids
+sample ## random fold ids
+```
+
+```{r}
+do.chunk <- function(chunkid, folddef, Xdat, Ydat, k){
+  train = (folddef!=chunkid)
+  Xtr = Xdat[train,]
+  Ytr = Ydat[train]
+  Xvl = Xdat[!train,]
+  Yvl = Ydat[!train]
+  ## get classifications for current training chunks
+  predYtr = knn(train = Xtr, test = Xtr, cl = Ytr, k = k)
+  ## get classifications for current test chunk
+  predYvl = knn(train = Xtr, test = Xvl, cl = Ytr, k = k)
+  data.frame(fold = chunkid, train.error = calc_error_rate(predYtr, Ytr),
+  val.error = calc_error_rate(predYvl, Yvl))
+}
+```
+
+Question 1
+```{r}
+error.folds <- NULL
+YTrain <- spam.train$y
+XTrain <- spam.train %>% select(-y)
+
+YTest <- spam.test$y
+XTest <- spam.test %>% select(-y)
+
+set.seed(1)
+kvec = c(1, seq(10, 50, length.out=5))
+for (j in kvec){
+  tmp <- ldply(1:nfold, do.chunk, folddef = folds, Xdat = XTrain, Ydat = YTrain, k = j)
+  tmp$neighbors <- j
+  error.folds <- rbind(error.folds,tmp)
+}
+error.folds
+```
+
+```{r}
+errors = melt(error.folds, id.vars=c('fold', 'neighbors'), value.name='error')
+val.error.means = errors %>%
+  filter(variable=='val.error') %>%
+  group_by(neighbors, variable) %>%
+  summarise_each(funs(mean), error) %>%
+  ungroup() %>%
+  filter(error==min(error))
+
+```
+
+```{r}
+numneighbor = max(val.error.means$neighbors)
+numneighbor
+```
+```{r}
+sum(is.na(spam.test))
+```
+Question 2 
+```{r}
+train_error <- do.chunk(6, folds, Xdat = XTrain, Ydat = YTrain, k = 10)
+
+pred.YTest = knn(train=XTrain, test=XTest, cl=YTrain, k=numneighbor)
+test_error <- calc_error_rate(pred.YTest,YTest)
+
+records <- replace(records,1, train_error$train.error)
+records <- replace(records,4, test_error)
+```
+
+Question 3
+```{r}
+controls <- tree.control(nobs= nrow(spam.train),mincut=5, mindev=1e-5)
+spamtree <- tree(y~., spam.train, control=controls)
+summary(spamtree)
+```
+There was 133 missclassified observations and there are 141 leaf nodes.
+
+Question 4
+```{r}
+prune <- prune.tree(spamtree,best=10, method = 'misclass')
+draw.tree(prune, nodeinfo = TRUE, cex = 0.4)
+```
+
+Question 5
+```{r}
+cv <- cv.tree(spamtree, rand=folds, FUN = prune.misclass, K=10)
+
+plot(cv$size, cv$dev, xlab = "Tree size", ylab = "Cross Validation Error")
+best.size.cv = min(cv$size[cv$dev == 351])
+best.size.cv
+spamtree.pruned <- prune.misclass(spamtree, best = best.size.cv)
+draw.tree(spamtree.pruned, nodeinfo = TRUE, cex = 0.4)
+```
+35 is the optimal amount tree size.
+
+Question 6
+```{r}
+predict.pruned.test <- predict(spamtree.pruned, spam.test, type = 'class')
+predict.pruned.train <- predict(spamtree.pruned, spam.train, type = 'class')
+prune.test.error <- calc_error_rate(predict.pruned.test, spam.test$y)
+prune.train.error <- calc_error_rate(predict.pruned.train, spam.train$y)
+
+records <- replace(records,2, prune.train.error)
+records <- replace(records,5, prune.test.error)
+```
+
+Question 7 will be written out in a separate segment
+
+Question 8
+```{r}
+glm.fit <- glm(y~., data=spam.train, family = binomial)
+prob.train = predict(glm.fit, spam.train, type="response")
+
+prob.test = predict(glm.fit, spam.test, type="response")
+
+spam.test <-
+  spam.test %>%
+  mutate(predSPAM = as.factor(ifelse(prob.test <= .5, "good", "spam")))
+
+spam.train <-
+  spam.train %>%
+  mutate(predSPAM = as.factor(ifelse(prob.train <= .5, "good", "spam")))
+
+```
+
+```{r}
+log.test.error <- calc_error_rate(spam.test$predSPAM, spam.test$y)
+log.train.error <- calc_error_rate(spam.train$predSPAM, spam.train$y)
+
+records <- replace(records,3, log.train.error)
+records <- replace(records,6, log.test.error)
+print(records)
+```
+
+Question 9
+```{r}
+pred <- prediction(prob.train, spam.train$y)
+perf = performance(pred, measure="tpr", x.measure="fpr")
+plot(perf, col=2, lwd=3, main="ROC curve")
+abline(0,1)
+
+auc = performance(pred, "auc")@y.values
+auc
+```
+
+We are more worried with false positive rates that are too large as that would filter out emails that could be potentially important to a client. While having a large true positive rate that is too small would mean that not a lot of spam is being filtered out, almost making the filter worthless, having a large false positive rate would be more of a detriment more than anything else.
